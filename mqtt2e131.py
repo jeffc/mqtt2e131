@@ -7,8 +7,7 @@ import atexit
 import sacn
 import socket
 
-MQTT_SERVER = "theserver"
-MQTT_PREFIX = "homeassistant/light/"
+HASS_MQTT_PREFIX = "homeassistant/light/"
 
 class SACNTarget:
   """A device with a given IP/hostname that can accept SACN packets.
@@ -68,10 +67,14 @@ class SACNTarget:
     
       
 class Light:
+  """A light. Takes an SACN target as an argument, allowing multiple lights to
+     map to different universes on the same target (or, theoretically, the same
+     universes). When Home Assistant turns off the light, we send all zeros and
+     then stop transmitting packets."""
 
   def __init__(self,
-      name, mqtt, target, start_universe, num_lights,
-      unique_name = None
+      name, target, mqtt_server, start_universe, num_lights,
+      unique_name = None, mqtt_port=1883, mqtt_prefix=HASS_MQTT_PREFIX,
       ):
     self.name = name
     self.unique_name = unique_name if unique_name else name
@@ -79,8 +82,11 @@ class Light:
     self.start_universe = start_universe
     self.num_lights = num_lights
     self.num_universes = (num_lights // 170) + (0 if (num_lights % 170 == 0) else 1)
-    self.mqtt = mqtt
-    self.prefix = MQTT_PREFIX + self.unique_name
+    self.mqtt = mqtt_client.Client()
+    self.mqtt.connect(mqtt_server, mqtt_port, 60) # TODO - what is the 60?
+    self.mqtt.loop_start()
+
+    self.prefix = mqtt_prefix + self.unique_name
     atexit.register(self.cleanup)
     self.register()
     self.setup_mqtt_callbacks()
@@ -166,16 +172,3 @@ class Light:
       else:
         self.fill(0,0,0)
         self.target.disableUniverses(self.start_universe, self.num_universes)
-
-      
-
-def main():
-  mqtt = mqtt_client.Client()
-  mqtt.connect("theserver", 1883, 60)
-  mqtt.loop_start()
-
-  s = SACNTarget("craftwindow", 2)
-  l = Light("crafttest", mqtt, s, 1, 284)
-  return l
-
-  

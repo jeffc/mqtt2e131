@@ -2,10 +2,13 @@
 
 from paho.mqtt import client as mqtt_client
 import json
+import atexit
 
 import sacn
 import socket
 
+MQTT_SERVER = "theserver"
+MQTT_PREFIX = "homeassistant/light/"
 
 class SACNTarget:
   """A device with a given IP/hostname that can accept SACN packets.
@@ -62,16 +65,87 @@ class SACNTarget:
         self.sender.flush()
         self.sender.manual_flush = False
     return UCtx()
-
     
       
 class Light:
 
-  def __init__(self, name, target, start_universe, num_lights):
+  def __init__(self,
+      name, mqtt, target, start_universe, num_lights,
+      unique_name = None
+      ):
     self.name = name
+    self.unique_name = unique_name if unique_name else name
     self.target = target
     self.start_universe = start_universe
     self.num_lights = num_lights
+    self.num_universes = (num_lights // 170) + (0 if (num_lights % 170 == 0) else 1)
+    self.mqtt = mqtt
+    self.prefix = MQTT_PREFIX + self.unique_name
+    atexit.register(self.cleanup)
+    self.register()
+    self.setup_mqtt_callbacks()
+
+    self.brightness = 255
+    self.on = False
+    self.color = (255, 255, 255)
+
+  def register(self):
+    self.mqtt.publish(self.prefix + "/config", json.dumps(
+      {
+        "~": self.prefix,
+        "name": self.name,
+        "unique_id": self.unique_name,
+        "cmd_t": "~/set",
+        "stat_t": "~/state",
+        "schema": "json",
+        "brightness": True,
+        "rgb": True
+      }))
+  
+
+  def publish_state(self):
+    self.mqtt.publish(self.prefix + "/state", json.dumps(
+      {
+        "state": "ON" if self.on else "OFF",
+        "brightness": self.brightness,
+        "color": {
+          "r": self.color[0],
+          "g": self.color[1],
+          "b": self.color[2]
+        }
+      }))
+
+  def setup_mqtt_callbacks(self):
+    def set_callback(client, userdata, msg):
+      M = json.loads(msg.payload)
+      if 'state' in M:
+        if M['state'] == 'ON':
+          self.on = True
+        else:
+          self.on = False
+
+      if 'brightness' in M:
+        self.brightness = M['brightness']
+      
+      if 'color' in M:
+        c = M['color']
+        self.color = (c['r'], c['g'], c['b'])
+
+      self.update_state()
+
+    print("setting callback for %s" % (self.prefix + "/set"))
+    self.mqtt.message_callback_add(self.prefix + "/set", set_callback)
+    self.mqtt.subscribe(self.prefix + "/set")
+
+
+
+  def deregister(self):
+    self.mqtt.publish(self.prefix + "/config", None)
+
+  def cleanup(self):
+    self.deregister()
+    self.target.sender.stop()
+
 
   def set(self, i, r, g, b):
     self.target.setRGB(self.start_universe, i, r, g, b)
@@ -81,11 +155,27 @@ class Light:
       for i in range(self.num_lights):
         self.set(i, r, g, b)
 
+  def update_state(self):
+      self.publish_state()
+      if self.on:
+        self.target.enableUniverses(self.start_universe, self.num_universes)
+        self.fill(
+            (self.brightness * self.color[0]) // 255,
+            (self.brightness * self.color[1]) // 255,
+            (self.brightness * self.color[2]) // 255)
+      else:
+        self.fill(0,0,0)
+        self.target.disableUniverses(self.start_universe, self.num_universes)
+
+      
+
 def main():
-  #mqtt = mqtt_client.Client()
-  #mqtt.connect("theserver", 1883, 60)
-  #mqtt.publish("test/test", "payload")
-  #mqtt.loop_forever()
-  pass
+  mqtt = mqtt_client.Client()
+  mqtt.connect("theserver", 1883, 60)
+  mqtt.loop_start()
+
+  s = SACNTarget("craftwindow", 2)
+  l = Light("crafttest", mqtt, s, 1, 284)
+  return l
 
   

@@ -122,7 +122,7 @@ class Light:
       while True:
         self.tick()
         time.sleep(1./FPS)
-    threading.Thread(target=tick_cb).run()
+    threading.Thread(target=tick_cb).start()
 
   def register(self):
     self.mqtt.publish(self.prefix + "/config", json.dumps(
@@ -179,9 +179,8 @@ class Light:
             self.effect = f(self)
 
 
-    print("setting callback for %s" % (self.prefix + "/set"))
     self.mqtt.message_callback_add(self.prefix + "/set", set_callback)
-    self.mqtt.subscribe(self.prefix + "/set")
+    self.mqtt.subscribe(self.prefix + "/set") 
 
 
 

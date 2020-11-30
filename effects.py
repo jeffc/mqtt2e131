@@ -26,7 +26,7 @@ class Colorful(Effect):
   """
 
   name = "Colorful"
-  ticks_until_change = 10
+  ticks_until_change = 20
 
   def start(self):
     self.ticks = 0 # counter

@@ -74,9 +74,13 @@ class Light:
      universes). When Home Assistant turns off the light, we send all zeros and
      then stop transmitting packets."""
 
+  ORDER_RGB = lambda c: (c[0], c[1], c[2])
+  ORDER_GRB = lambda c: (c[1], c[0], c[2])
+
   def __init__(self,
       name, target, mqtt_server, start_universe, num_lights,
       unique_name = None, mqtt_port=1883, mqtt_prefix=HASS_MQTT_PREFIX,
+      color_order=ORDER_RGB
       ):
     self.name = name
     self.unique_name = unique_name if unique_name else name
@@ -84,6 +88,8 @@ class Light:
     self.start_universe = start_universe
     self.num_lights = num_lights
     self.num_universes = (num_lights // 170) + (0 if (num_lights % 170 == 0) else 1)
+    self.color_mapper = color_order
+
     self.mqtt = mqtt_client.Client()
     self.mqtt.connect(mqtt_server, mqtt_port, 60) # TODO - what is the 60?
     self.mqtt.loop_start()
@@ -156,7 +162,8 @@ class Light:
 
 
   def set(self, i, r, g, b):
-    self.target.setRGB(self.start_universe, i, r, g, b)
+    rr, gg, bb = self.color_mapper((r,g,b))
+    self.target.setRGB(self.start_universe, i, rr, gg, bb)
 
   def fill(self, r, g, b):
     with self.target.updateContext():

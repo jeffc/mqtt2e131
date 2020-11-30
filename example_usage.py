@@ -10,7 +10,7 @@ NUM_UNIVERSES_ON_HOST = 3
 NUM_LIGHTS = 381
 
 target = SACNTarget(HOST, NUM_UNIVERSES_ON_HOST)
-L = Light("light_name_in_hass", target, MQTT_SERVER, 1, NUM_LIGHTS)
+L = Light("light_name_in_hass", target, MQTT_SERVER, 1, NUM_LIGHTS, color_order=Light.ORDER_RGB)
 
 while True:
   time.sleep(1)

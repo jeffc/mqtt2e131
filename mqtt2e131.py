@@ -7,6 +7,8 @@ import atexit
 import sacn
 import socket
 
+#TODO - allow graceful exit with all threads ending
+
 HASS_MQTT_PREFIX = "homeassistant/light/"
 
 class SACNTarget:

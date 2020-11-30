@@ -109,7 +109,7 @@ class Light:
     self.register()
     self.setup_mqtt_callbacks()
 
-    self.brightness = 255
+    self.brightness = 127
     self.on = False
     self.color = (255, 255, 255)
     self.effect = Solid(self)

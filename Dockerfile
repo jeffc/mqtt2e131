@@ -1,6 +1,6 @@
 FROM python:latest
 
-WORKDIR /run
+WORKDIR /code
 
 COPY requirements.txt .
 

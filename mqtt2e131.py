@@ -1,15 +1,24 @@
 #!/usr/bin/python3
 
 from paho.mqtt import client as mqtt_client
-import json
 import atexit
-
+import json
 import sacn
 import socket
+import threading
+import time
+
+from effects import *
+
+ALL_EFFECTS = [
+    Solid,
+    Colorful,
+]
 
 #TODO - allow graceful exit with all threads ending
 
 HASS_MQTT_PREFIX = "homeassistant/light/"
+FPS = 10
 
 class SACNTarget:
   """A device with a given IP/hostname that can accept SACN packets.
@@ -24,6 +33,7 @@ class SACNTarget:
     self.hostip = socket.gethostbyname(host)
     for u in range(start_universe, n_universes+start_universe):
       self.enableUniverses(u)
+    time.sleep(1) # give sacn a chance to initialize
     print(
         "Started sACN sender to %s with universes %d to %d" % (
           self.hostip, start_universe, n_universes + start_universe - 1))
@@ -102,6 +112,17 @@ class Light:
     self.brightness = 255
     self.on = False
     self.color = (255, 255, 255)
+    self.effect = Solid(self)
+
+    self.last_published_state = ""
+    self.publish_state()
+
+    # start the effect ticker
+    def tick_cb():
+      while True:
+        self.tick()
+        time.sleep(1./FPS)
+    threading.Thread(target=tick_cb).run()
 
   def register(self):
     self.mqtt.publish(self.prefix + "/config", json.dumps(
@@ -113,12 +134,14 @@ class Light:
         "stat_t": "~/state",
         "schema": "json",
         "brightness": True,
-        "rgb": True
+        "rgb": True,
+        "effect": True,
+        "fx_list": [ fx.name for fx in ALL_EFFECTS]
       }))
   
 
-  def publish_state(self):
-    self.mqtt.publish(self.prefix + "/state", json.dumps(
+  def publish_state(self, force=False):
+    state_str = json.dumps(
       {
         "state": "ON" if self.on else "OFF",
         "brightness": self.brightness,
@@ -126,8 +149,12 @@ class Light:
           "r": self.color[0],
           "g": self.color[1],
           "b": self.color[2]
-        }
-      }))
+        },
+        "effect": self.effect.name
+      })
+    if force or (state_str != self.last_published_state):
+      self.mqtt.publish(self.prefix + "/state", state_str)
+      self.last_published_state = state_str
 
   def setup_mqtt_callbacks(self):
     def set_callback(client, userdata, msg):
@@ -145,7 +172,12 @@ class Light:
         c = M['color']
         self.color = (c['r'], c['g'], c['b'])
 
-      self.update_state()
+      if 'effect' in M:
+        fx = M['effect']
+        for f in ALL_EFFECTS:
+          if f.name == fx:
+            self.effect = f(self)
+
 
     print("setting callback for %s" % (self.prefix + "/set"))
     self.mqtt.message_callback_add(self.prefix + "/set", set_callback)
@@ -161,8 +193,12 @@ class Light:
     self.target.sender.stop()
 
 
-  def set(self, i, r, g, b):
+  def set(self, i, r, g, b, absolute=False):
     rr, gg, bb = self.color_mapper((r,g,b))
+    if not absolute:
+      rr = (rr * self.brightness) // 255
+      gg = (gg * self.brightness) // 255
+      bb = (bb * self.brightness) // 255
     self.target.setRGB(self.start_universe, i, rr, gg, bb)
 
   def fill(self, r, g, b):
@@ -170,14 +206,15 @@ class Light:
       for i in range(self.num_lights):
         self.set(i, r, g, b)
 
-  def update_state(self):
-      self.publish_state()
-      if self.on:
-        self.target.enableUniverses(self.start_universe, self.num_universes)
-        self.fill(
-            (self.brightness * self.color[0]) // 255,
-            (self.brightness * self.color[1]) // 255,
-            (self.brightness * self.color[2]) // 255)
-      else:
+  # called periodically by a separate thread
+  def tick(self):
+    self.publish_state()
+    if self.on:
+      self.target.enableUniverses(self.start_universe, self.num_universes)
+      self.effect.tick()
+    else:
+      try: # might fail if universes are disabled
         self.fill(0,0,0)
-        self.target.disableUniverses(self.start_universe, self.num_universes)
+      except:
+        pass
+      self.target.disableUniverses(self.start_universe, self.num_universes)

@@ -6,6 +6,6 @@ COPY requirements.txt .
 
 RUN pip install -r requirements.txt
 
-COPY *.py ./
+COPY mqtt2e131.py ./
 
 CMD ["python", "run.py"]

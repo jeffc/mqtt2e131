@@ -202,9 +202,11 @@ class Light:
       rr = (rr * self.brightness) // 255
       gg = (gg * self.brightness) // 255
       bb = (bb * self.brightness) // 255
-    self.buffer[i*3] = rr
-    self.buffer[i*3+1] = gg
-    self.buffer[i*3+2] = bb
+    # add two dead channels for each universe
+    offset = (i*3) + (( i // 170 )*2)
+    self.buffer[offset + 0] = rr
+    self.buffer[offset + 1] = gg
+    self.buffer[offset + 2] = bb
 
   def fill(self, r, g, b):
     with self.target.updateContext():

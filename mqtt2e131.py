@@ -122,7 +122,7 @@ class Light:
       while True:
         self.tick()
         time.sleep(1./FPS)
-    threading.Thread(target=tick_cb).start()
+    threading.Thread(target=tick_cb, name=self.unique_name+"-fx").start()
 
   def register(self):
     self.mqtt.publish(self.prefix + "/config", json.dumps(

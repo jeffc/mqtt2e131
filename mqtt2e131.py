@@ -38,29 +38,22 @@ class SACNTarget:
         "Started sACN sender to %s with universes %d to %d" % (
           self.hostip, start_universe, n_universes + start_universe - 1))
 
-  def setRGB(self, start_universe, pix_offset, r, g, b):
-    def offset(start, o):
-      u = start + (o // self.channels_per_universe)
-      i = o - ((u-start) * self.channels_per_universe)
-      return (u, i)
+  def setUniverses(self, start_u, data):
+    num_us = len(data) // 512
+    if len(data) % 512 != 0:
+      print("WARNING - incomplete universe given to setUniverses() (%d)" % len(data))
 
-    def setDMXVal(u, i, v):
-      """Tuples aren't assignable, so this helper handles the conversion and
-      update"""
-      L = list(self.sender[u].dmx_data)
-      L[i] = v
-      self.sender[u].dmx_data = L
-
-    u,i = offset(start_universe, pix_offset*3)
-    setDMXVal(u, i, r)
-    u,i = offset(start_universe, pix_offset*3+1)
-    setDMXVal(u, i, g)
-    u,i = offset(start_universe, pix_offset*3+2)
-    setDMXVal(u, i, b)
+    if start_u not in self.sender.get_active_outputs():
+      self.enableUniverses(start_u, num_us)
+      
+    for u in range(start_u, start_u + num_us):
+      self.sender[u].dmx_data = data[(u - start_u)*512 : (u - start_u + 1)*512]
 
   def disableUniverses(self, start_u, num_u=1):
     for u in range(start_u, start_u + num_u):
-      self.sender.deactivate_output(u)
+      if u in self.sender.get_active_outputs():
+        self.sender[u].dmx_data = [0]*512
+        self.sender.deactivate_output(u)
 
   def enableUniverses(self, start_u, num_u=1):
     for u in range(start_u, start_u + num_u):
@@ -69,6 +62,8 @@ class SACNTarget:
       self.sender[u].multicast = False
 
   def updateContext(self):
+    # still not sure if this is necessary to prevent stuttering on universe
+    # gaps, but it doesn't seem to be having any negative impact.
     class UCtx:
       def __enter__(ss):
         self.sender.manual_flush = True
@@ -112,6 +107,7 @@ class Light:
     self.brightness = 127
     self.on = False
     self.color = (255, 255, 255)
+    self.buffer = [255] * (self.num_universes * 512)
     self.effect = Solid(self)
 
     self.last_published_state = ""
@@ -198,12 +194,17 @@ class Light:
       rr = (rr * self.brightness) // 255
       gg = (gg * self.brightness) // 255
       bb = (bb * self.brightness) // 255
-    self.target.setRGB(self.start_universe, i, rr, gg, bb)
+    self.buffer[i*3] = rr
+    self.buffer[i*3+1] = gg
+    self.buffer[i*3+2] = bb
 
   def fill(self, r, g, b):
     with self.target.updateContext():
       for i in range(self.num_lights):
         self.set(i, r, g, b)
+
+  def show(self):
+    self.target.setUniverses(self.start_universe, self.buffer)
 
   # called periodically by a separate thread
   def tick(self):
@@ -211,9 +212,6 @@ class Light:
     if self.on:
       self.target.enableUniverses(self.start_universe, self.num_universes)
       self.effect.tick()
+      self.show()
     else:
-      try: # might fail if universes are disabled
-        self.fill(0,0,0)
-      except:
-        pass
       self.target.disableUniverses(self.start_universe, self.num_universes)

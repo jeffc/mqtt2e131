@@ -101,7 +101,6 @@ class Light:
 
     self.prefix = mqtt_prefix + self.unique_name
     atexit.register(self.cleanup)
-    self.register()
     self.setup_mqtt_callbacks()
 
     self.brightness = 127
@@ -119,6 +118,15 @@ class Light:
         self.tick()
         time.sleep(1./FPS)
     threading.Thread(target=tick_cb, name=self.unique_name+"-fx").start()
+
+    # start the registration ticker. Publishes the existence of this light to
+    # home assistant once every 10 seconds
+
+    def reg_cb():
+      while True:
+        self.register()
+        time.sleep(10)
+    threading.Thread(target=reg_cb, name=self.unique_name+"-reg").start()
 
   def register(self):
     self.mqtt.publish(self.prefix + "/config", json.dumps(

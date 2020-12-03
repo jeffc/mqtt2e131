@@ -26,6 +26,8 @@ class SACNTarget:
 
   def __init__(self, host, n_universes, start_universe=1, channels_per_universe=510):
     self.sender = sacn.sACNsender()
+    self.sender.universeDiscovery = False
+    self.source_name = "mqtt2e131"
     self.sender.start()
     self.host = host
     self.channels_per_universe = channels_per_universe

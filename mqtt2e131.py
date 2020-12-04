@@ -52,10 +52,11 @@ class SACNTarget:
       self.sender[u].dmx_data = data[(u - start_u)*512 : (u - start_u + 1)*512]
 
   def disableUniverses(self, start_u, num_u=1):
-    for u in range(start_u, start_u + num_u):
-      if u in self.sender.get_active_outputs():
-        self.sender[u].dmx_data = [0]*512
-        self.sender.deactivate_output(u)
+    with self.updateContext():
+      for u in range(start_u, start_u + num_u):
+        if u in self.sender.get_active_outputs():
+          self.sender[u].dmx_data = [0]*512
+          self.sender.deactivate_output(u)
 
   def enableUniverses(self, start_u, num_u=1):
     for u in range(start_u, start_u + num_u):

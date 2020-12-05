@@ -33,9 +33,9 @@ class SACNTarget:
     self.channels_per_universe = channels_per_universe
     # TODO - periodically re-lookup hosts
     self.hostip = socket.gethostbyname(host)
-    for u in range(start_universe, n_universes+start_universe):
-      self.enableUniverses(u)
-    time.sleep(1) # give sacn a chance to initialize
+    #for u in range(start_universe, n_universes+start_universe):
+    #  self.enableUniverses(u)
+    #time.sleep(1) # give sacn a chance to initialize
     print(
         "Started sACN sender to %s with universes %d to %d" % (
           self.hostip, start_universe, n_universes + start_universe - 1))
@@ -45,18 +45,21 @@ class SACNTarget:
     if len(data) % 512 != 0:
       print("WARNING - incomplete universe given to setUniverses() (%d)" % len(data))
 
-    if start_u not in self.sender.get_active_outputs():
-      self.enableUniverses(start_u, num_us)
-      
     for u in range(start_u, start_u + num_us):
+      if u not in self.sender.get_active_outputs():
+        self.enableUniverses(u)
       self.sender[u].dmx_data = data[(u - start_u)*512 : (u - start_u + 1)*512]
 
   def disableUniverses(self, start_u, num_u=1):
-    with self.updateContext():
-      for u in range(start_u, start_u + num_u):
-        if u in self.sender.get_active_outputs():
-          self.sender[u].dmx_data = [0]*512
-          self.sender.deactivate_output(u)
+    for u in range(start_u, start_u + num_u):
+      if u in self.sender.get_active_outputs():
+        self.sender[u].dmx_data = [0]*512
+
+    self.sender.manual_flush = True
+    self.sender.flush()
+    time.sleep(0.2)
+    for u in range(start_u, start_u + num_u):
+      self.sender.deactivate_output(u)
 
   def enableUniverses(self, start_u, num_u=1):
     for u in range(start_u, start_u + num_u):

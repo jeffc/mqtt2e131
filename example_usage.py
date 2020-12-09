@@ -13,7 +13,9 @@ NUM_LIGHTS = 381
 
 def main():
   target = SACNTarget(HOST, NUM_UNIVERSES_ON_HOST)
-  L = Light("light_name_in_hass", target, MQTT_SERVER, 1, NUM_LIGHTS, color_order=Light.ORDER_RGB)
+  L = Light("light_name_in_hass", MQTT_SERVER, NUM_LIGHTS, color_order=Light.ORDER_RGB)
+
+  target.add(L, 1) # 1 is the start universe
 
   while True:
     time.sleep(1)

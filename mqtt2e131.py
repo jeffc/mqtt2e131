@@ -7,6 +7,7 @@ import sacn
 import socket
 import threading
 import time
+import numpy as np
 
 from effects import *
 
@@ -19,6 +20,7 @@ ALL_EFFECTS = [
 
 HASS_MQTT_PREFIX = "homeassistant/light/"
 FPS = 10
+MAX_FRAME_TIME = 1 # number of seconds after which to resend unchanged data
 
 class SACNTarget:
   """A device with a given IP/hostname that can accept SACN packets.
@@ -27,18 +29,82 @@ class SACNTarget:
   def __init__(self, host, n_universes, start_universe=1, channels_per_universe=510):
     self.sender = sacn.sACNsender()
     self.sender.universeDiscovery = False
-    self.source_name = "mqtt2e131"
+    self.sender.source_name = "mqtt2e131"
     self.sender.start()
+    self.sender.manual_flush = True
     self.host = host
     self.channels_per_universe = channels_per_universe
+
+    # double-buffer the output
+    self.buffer = np.array([0] * ((n_universes+1) * 512))
+    self.oldbuffer = np.array([0] * ((n_universes+1) * 512))
+
     # TODO - periodically re-lookup hosts
     self.hostip = socket.gethostbyname(host)
-    #for u in range(start_universe, n_universes+start_universe):
-    #  self.enableUniverses(u)
-    #time.sleep(1) # give sacn a chance to initialize
+
     print(
         "Started sACN sender to %s with universes %d to %d" % (
           self.hostip, start_universe, n_universes + start_universe - 1))
+    self.lights = []
+
+    def tick_cb():
+      frames_since_last_draw = 0
+      while True:
+        T = self.oldbuffer
+        self.oldbuffer = self.buffer
+
+        should_activate_universes = []
+
+        for (L, start_u) in self.lights:
+          L.tick()
+
+          start_ch = (start_u * 512)
+          end_ch = start_ch + (L.num_universes * 512)
+          
+          if L.on:
+            T[start_ch:end_ch] = L.buffer
+            for u in range(start_u, start_u + L.num_universes):
+              should_activate_universes.append(u)
+          else:
+            T[start_ch:end_ch] = 0
+
+        self.buffer = T
+
+        for u in should_activate_universes:
+          if u not in self.sender.get_active_outputs():
+            print("Enabling universe %d" % u)
+            self.enableUniverses(u)
+
+        frames_since_last_draw += 1
+        buffer_changed = not(np.array_equal(self.oldbuffer, self.buffer))
+        if buffer_changed or frames_since_last_draw >= (FPS / MAX_FRAME_TIME):
+          if buffer_changed:
+            for u in self.sender.get_active_outputs():
+              self.sender[u].dmx_data = self.buffer[512*u:512*(u+1)]
+
+          self.sender.flush()
+          frames_since_last_draw = 0
+
+        for u in self.sender.get_active_outputs():
+          if u not in should_activate_universes:
+            print("Disabling universe %d" % u)
+            self.disableUniverses(u)
+
+        time.sleep(1.0/FPS)
+
+
+    def status_cb():
+      while True:
+        for (L,_) in self.lights:
+          L.publish_state()
+        time.sleep(10)
+
+    threading.Thread(target=tick_cb, name=self.host+"-tick").start()
+    threading.Thread(target=status_cb, name=self.host+"-status").start()
+
+
+  def add(self, L, start_u):
+    self.lights.append((L, start_u))
 
   def setUniverses(self, start_u, data):
     num_us = len(data) // 512
@@ -89,14 +155,12 @@ class Light:
   ORDER_GRB = lambda c: (c[1], c[0], c[2])
 
   def __init__(self,
-      name, target, mqtt_server, start_universe, num_lights,
+      name, mqtt_server, num_lights,
       unique_name = None, mqtt_port=1883, mqtt_prefix=HASS_MQTT_PREFIX,
       color_order=ORDER_RGB
       ):
     self.name = name
     self.unique_name = unique_name if unique_name else name
-    self.target = target
-    self.start_universe = start_universe
     self.num_lights = num_lights
     self.num_universes = (num_lights // 170) + (0 if (num_lights % 170 == 0) else 1)
     self.color_mapper = color_order
@@ -116,23 +180,11 @@ class Light:
     self.effect = Solid(self)
 
     self.last_published_state = ""
+    self.register()
     self.publish_state()
-
-    # start the effect ticker
-    def tick_cb():
-      while True:
-        self.tick()
-        time.sleep(1./FPS)
-    threading.Thread(target=tick_cb, name=self.unique_name+"-fx").start()
 
     # start the registration ticker. Publishes the existence of this light to
     # home assistant once every 10 seconds
-
-    def reg_cb():
-      while True:
-        self.register()
-        time.sleep(10)
-    threading.Thread(target=reg_cb, name=self.unique_name+"-reg").start()
 
   def register(self):
     self.mqtt.publish(self.prefix + "/config", json.dumps(
@@ -187,6 +239,7 @@ class Light:
         for f in ALL_EFFECTS:
           if f.name == fx:
             self.effect = f(self)
+      self.publish_state()
 
 
     self.mqtt.message_callback_add(self.prefix + "/set", set_callback)
@@ -199,7 +252,6 @@ class Light:
 
   def cleanup(self):
     self.deregister()
-    self.target.sender.stop()
 
 
   def set(self, i, r, g, b, absolute=False):
@@ -215,19 +267,10 @@ class Light:
     self.buffer[offset + 2] = bb
 
   def fill(self, r, g, b):
-    with self.target.updateContext():
-      for i in range(self.num_lights):
-        self.set(i, r, g, b)
-
-  def show(self):
-    self.target.setUniverses(self.start_universe, self.buffer)
+    for i in range(self.num_lights):
+      self.set(i, r, g, b)
 
   # called periodically by a separate thread
   def tick(self):
-    self.publish_state()
     if self.on:
-      self.target.enableUniverses(self.start_universe, self.num_universes)
       self.effect.tick()
-      self.show()
-    else:
-      self.target.disableUniverses(self.start_universe, self.num_universes)

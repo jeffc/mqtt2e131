@@ -40,10 +40,9 @@ class Colorful(Effect):
         (0x00, 0x77, 0xCC)
     ]
 
-    with self.L.target.updateContext():
-      for i in range(0, self.L.num_lights):
-        r, g, b = colors[(i + self.offset) % len(colors)]
-        self.L.set(i, r, g, b)
+    for i in range(0, self.L.num_lights):
+      r, g, b = colors[(i + self.offset) % len(colors)]
+      self.L.set(i, r, g, b)
 
     self.ticks += 1
     self.ticks %= self.ticks_until_change
